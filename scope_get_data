@@ -1,0 +1,464 @@
+#!/usr/bin/perl
+#
+# Data download from Keysight oscilloscope (tested with DSOX3024T) - May work with other oscilloscopes
+#
+# Jon Meek - 1 Jan 2016 - Working RS-232 version after years of dormancy
+#
+# Keysight DSOX3024T via TCP - 10 Aug 2016
+
+# Copyright (C) 2016  Jon Meek
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=head1 NAME
+
+B<scope_get_data> - Simple oscilloscope waveform download and store utility.
+
+=head1 SYNOPSIS
+
+B<scope_get_data --ip IPofScope --points nnnn --channels channel,numbers --channelnames optional,filenames --datadir
+FileDestinationDirectory --file filename --tsfile --prompt --overwrite --debug --port nnnn --help --man>
+
+=head1 DESCRIPTION
+
+Download waveform data from a Keysight (and possibly other) oscilloscope over a TCP connection and store in an ASCII file.
+
+Word (16 bit) format is used to download the waveforms.
+
+=head1 OPTIONS
+
+=over 5
+
+=item B<--ip 192.168.1.10>
+
+ IP address or name of scope. Required.
+
+=item B<--points nnnn>
+
+Optional number of waveform points to transfer. Valid
+numbers are:100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000,
+100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000. 
+
+Defaults to MAX if not specified. Note that the scope may not have the number of points requested available, so a smaller number of waveform points may be transferred.
+
+If specified, the requested point number is validated against the list above.
+
+=item B<--channels n,i,j,k>
+
+Comma separated list of channels to save. Default is channel 1 only.
+
+=item B<--channelnames Name1,Name2>
+
+Optional comma separated list of channel names to be used in the file. Default is Chan1, Chan2, Chan3, Chan4.
+
+=item B<--datadir dir>
+
+Directory where data files are stored.
+
+=item B<--file filename>
+
+Filename to be used for data.
+
+=item B<--tsfile>
+
+Add UTC timestamp to the filename. A good way to make unique filenames when recording multiple data sets.
+
+If B<--file filename> is also specified then filename will be used as a prefix to the final file name, do not include an extension since B<--tsfile> adds '.dat' as the file extension.
+
+=item B<--prompt>
+
+Prompt the user for a comment to be added to the file.
+
+=item B<--overwrite>
+
+If the destination file exists, overwrite it. The default is for the transfer to fail so that a new filename can be specified.
+
+=item B<--debug>
+
+Print extra information about the transfer on the command line.
+
+=item B<--port 5025>
+
+Defaults to 5025. Should not be changed for Keysight instruments.
+
+=item B<--help>
+
+Display command line argument synopsis and exit.
+
+=item B<--man>
+
+Display the entire man page.
+
+=back
+
+=head1 EXAMPLES
+
+Display the full man page:
+
+ scope_get_data --man
+
+Get all available data points from channel 1 and write to file in current directory:
+
+ scope_get_data --ip 192.168.3.14 --file test1.dat
+
+Get 10000 (or fewer) data points from channels 1 and 3, specify the
+data storage directory, set a filename prefix, custom name the data
+columns, generate a unique filename with a UTC timestamp:
+
+ scope_get_data --ip 192.168.3.14 --points 10000 --datadir /usr2/data --file test2 --channels 1,3 --channelnames Antenna,BareWire --tsfile
+
+=head1 FILE FORMAT
+
+ Instrument ID
+ Original file name, full path if --datadir is specified
+ Optional comment when --prompt option is added, readers will need to handle
+ UTC date and time of data transfer
+ Units, first two columns are hardcoded to 'int' and 'second', other columns come from the scope
+ Column names, first two columns are hardcoded to 'n' and 't'
+ Lines of space separated data
+
+Example, with optional comment:
+
+ KEYSIGHT TECHNOLOGIES,DSO-X 3024T,MY56271xxx,04.07.2016040803
+ /home/meekj/temp/scope/example1-20161030024802.dat
+ Fanfare FM Antenna & Random Length Wire
+ 2016-10-30T02:48:02
+ int second VOLT VOLT
+ n t Chan1 Chan3
+ 1 -2.500000e-07 -0.005226131456 0.024924619008
+ 2 -2.498000e-07 -0.004824121344 0.02814069888
+ 3 -2.496000e-07 -0.00402010112 0.03216079872
+ 4 -2.494000e-07 -0.003618091008 0.035376878592
+ 5 -2.492000e-07 -0.002814070784 0.039396978432
+ 6 -2.490000e-07 -0.00201005056 0.04422109824
+ 7 -2.488000e-07 -0.001206030336 0.04824119808
+ 8 -2.486000e-07 -0.000402010112 0.05226129792
+ 9 -2.484000e-07 0.000402010112 0.05628139776
+ 10 -2.482000e-07 0.000804020224 0.0603014976
+ ...
+
+=head1 BUGS
+
+Tested only on Linux and MacOS. Will likely need modification for Windows.
+
+There probably are some. Only limited testing has been done, see the list of tests in the code, following __END__ .
+
+Error checking is currently limited.
+
+All channels are assumed to have the same timebase settings.
+
+=head1 AUTHOR
+
+Jon Meek - meekj [at] ieee.org  ||  meekjt [at] gmail.com
+
+=cut
+
+use strict;
+use warnings;
+
+use Time::HiRes qw( gettimeofday tv_interval );
+use IO::Socket::INET;
+use Getopt::Long;
+use Pod::Usage;
+
+
+my $RCSid = q{$Id: scope_get_data,v 1.10 2016/10/30 03:28:01 meekj Exp $};
+
+my ($ScopeIP, $Port, $PointsToRead, $OutputFile, $ChannelList, $ChannelNameList, $TimeStampFileName, $PromptForComment, $Debug, $Help, $ManPage);
+my ($Comment, $ISOsec, $NumPoints, $NumPointsString, $OUTFILE, $OutputData, $OutputFilename, 
+    $ScopeID, $TimeOut, $WaveTimeIncrement, $WaveTimeOrigin, $WaveTimeReference, $WaveUnits, $fmtISOsec, $num_points);
+my (@ChannelNumber, @ChannelName, @ChannelNames, @twave, @UnitsOrder, @NameOrder, @PointsPerChannel);
+my %Wave;
+
+$| = 1; # Flush on every write, default as of IO::Socket 1.18
+
+$Debug = 0;
+
+$Port = 5025; # Default
+
+my @ChannelsToGet = (1); # Default Channel 1 only
+my $DataDirectory = q{.}; # Default is current directory
+my $Overwrite = 0;
+
+pod2usage("$0: No arguments provided.") if (@ARGV == 0);
+
+GetOptions(
+    'ip=s' => \$ScopeIP,
+    'port=s' => \$Port,
+    'points=i' => \$PointsToRead,
+    'datadir=s' => \$DataDirectory,
+    'file=s' => \$OutputFile,
+    'channels=s' => \$ChannelList,
+    'channelnames=s' => \$ChannelNameList,
+    'overwrite' => \$Overwrite,
+    'tsfile' => \$TimeStampFileName,
+    'prompt' => \$PromptForComment,
+    'debug' => \$Debug,
+    'help|h' => \$Help,
+    'man' => \$ManPage,
+    );
+
+pod2usage(1) if ($Help);
+pod2usage(-verbose => 2) if ($ManPage);
+
+
+if ($PointsToRead) {
+    my %ValidPointCounts;
+    my @keys = (100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 4000000, 8000000);
+    my @values = (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    @ValidPointCounts{@keys} = @values;
+
+    if (!$ValidPointCounts{$PointsToRead}) {
+	print "\nValid points to read are: @keys\n";
+	exit;
+    }
+    $NumPointsString = qq{WAVEFORM:POINTS $PointsToRead\r\n};
+
+} else {
+    $NumPointsString = qq{WAVEFORM:POINTS MAX\r\n};
+}
+
+$TimeOut = 10 unless $TimeOut;
+
+@ChannelsToGet = split(/,/, $ChannelList) if ($ChannelList);
+
+if ($ChannelNameList) {
+    @ChannelNames  = split(/,/, $ChannelNameList);
+
+} else { # Generate default channel names
+    for (my $i = 0; $i < @ChannelsToGet; $i++) {
+	my $chan_name = qq{Chan$ChannelsToGet[$i]};
+	push (@ChannelNames, $chan_name);
+    }
+}
+
+# Add check for channel and name count match
+
+($ISOsec, $fmtISOsec) = &ISOsecond; # Get current time in two formats
+
+if ($TimeStampFileName) {
+    if ($OutputFile) {
+	$OutputFile = $OutputFile . '-' . $ISOsec . '.dat';
+    } else {
+	$OutputFile = $ISOsec . '.dat';
+    }
+    $OutputFilename = qq{$DataDirectory/$OutputFile};
+} else {
+    $OutputFilename = qq{$DataDirectory/$OutputFile};
+}
+print "Output Filename: $OutputFilename\n";
+
+if (-f $OutputFilename && !$Overwrite) {
+    print "$OutputFilename exists, use --overwrite to Overwrite the old file\n";
+    exit;
+}
+
+open($OUTFILE, ">", $OutputFilename) || die "Can't Open Output File: $OutputFilename";
+
+$Comment = '';
+if ($PromptForComment) {
+    print "Comment for data file:\n";
+    $Comment = <STDIN>;
+    &TrimWhiteCRLF($Comment);
+    print "Comment: $Comment\n" if $Debug;
+}
+
+my $socket = IO::Socket::INET->new(PeerAddr => $ScopeIP, PeerPort => $Port,
+				   Type => SOCK_STREAM, Proto => 'tcp',
+				   TimeOut => $TimeOut)
+    or die "Could not connect to $ScopeIP  Port $Port";
+
+# Initialize download
+#
+
+print $socket "*IDN?\r\n";
+$ScopeID = <$socket>;
+
+&TrimWhiteCRLF($ScopeID);
+print "ScopeID: $ScopeID\n" if $Debug;
+
+print $socket "WAVeform:POINts:MODE RAW\r\n";  # Needed to get more than 62500 points
+
+# print $socket "WAVEFORM:FORMAT BYTE\r\n"; # May truncate some data
+print $socket "WAVEFORM:FORMAT WORD\r\n";
+print $socket "WAVEFORM:BYTEORDER MSBFirst\r\n"; # Big endian byte order
+print $socket $NumPointsString;
+
+# Get waveforms from each specified channel
+#
+#foreach my $i (@ChannelsToGet) {
+
+for (my $i = 0; $i < @ChannelsToGet; $i++) {
+
+    $ChannelNumber[$i] = $ChannelsToGet[$i];
+    if ($ChannelNames[$i]) {
+	$ChannelName[$i] = $ChannelNames[$i];
+    } else {
+	$ChannelName[$i] = qq{Chan$ChannelNumber[$i]};
+    }
+    print "Loop: $i Channel: $ChannelNumber[$i]  Name: $ChannelName[$i]\n" if $Debug;
+
+    ($WaveUnits, $WaveTimeIncrement, $WaveTimeOrigin, $WaveTimeReference, @twave) = &GetWaveform($ChannelNumber[$i]);
+    print "Back from GetWaveform\n" if $Debug;
+    $Wave{$ChannelName[$i]} = [ @twave ];
+    push(@UnitsOrder, $WaveUnits);
+    push(@NameOrder, $ChannelName[$i]);
+    $num_points = @twave;
+    push(@PointsPerChannel, $num_points);
+    print "Got Channel: $ChannelNumber[$i]  Points: $num_points  $ChannelName[$i]\n";
+}
+
+$NumPoints = $PointsPerChannel[0]; # Should verify all the same length
+
+print "NumPoints: $NumPoints\n" if $Debug;
+
+# File Header
+#
+print $OUTFILE "$ScopeID\n";
+print $OUTFILE "$OutputFilename\n";
+print $OUTFILE "$Comment\n" if (length($Comment)); # Reader will have to account for this being optional
+print $OUTFILE "$fmtISOsec\n";
+
+$OutputData = q{int second }; # Units header
+$OutputData .= join(' ', @UnitsOrder);
+print $OUTFILE "$OutputData\n";
+
+$OutputData = q{n t }; # Column names header
+$OutputData .= join(' ', @NameOrder);
+print $OUTFILE "$OutputData\n";
+
+# Format waveform data lines
+#
+for (my $i = 0; $i < $NumPoints; $i++) {
+    my $t = ($i - $WaveTimeReference) * $WaveTimeIncrement + $WaveTimeOrigin; # Assume a single timebase for all channels...
+    $OutputData = sprintf("%d %.6e", $i + 1, $t);
+
+    foreach my $name (@NameOrder) {
+	my $v = $Wave{$name}[$i];
+	$OutputData .= qq{ $v};
+    }
+    print $OUTFILE "$OutputData\n";
+}
+
+$socket->shutdown(2); # We have stopped using this socket
+
+sub GetWaveform {
+    my ($channel) = @_;
+    my @Waveform = ();
+    my ($count, $read_buffer, $buffer, $timeout, $i);
+    my ($format, $type, $num_points, $wave_count, $wave_xincrement, $wave_xorigin);
+
+    my ($wave_xreference, $wave_yincrement, $wave_yorigin, $wave_yreference, $channel_units, $data_buffer, $tag_char_count,
+	$data_byte_count, $length_data_buffer);
+
+    $socket->write(":CHANnel$channel:UNITs?\r\n");
+    $channel_units = <$socket>;
+    &TrimWhiteCRLF($channel_units);
+
+    $socket->write("WAVEFORM:SOURCE CHANNEL$channel\r\n");
+    $socket->write("WAVEFORM:PREAMBLE?\r\n");
+    $read_buffer = <$socket>;
+    $count = length($read_buffer);
+    print "Preamble $count chars: $read_buffer\n" if $Debug;
+
+    ($format, $type, $num_points, $wave_count, $wave_xincrement, $wave_xorigin,
+     $wave_xreference, $wave_yincrement, $wave_yorigin, $wave_yreference) = split(/,/, $read_buffer);
+
+# Request the data
+#
+    $socket->write("WAVEFORM:DATA?\r\n");
+    $buffer = <$socket>;
+
+    $buffer =~ /\A\#(\d{1})/;
+    $tag_char_count = $1;
+
+    $buffer =~ /\A\#(\d{1})(\d{$tag_char_count})/;
+    $data_byte_count = $2 + 0; # Make it an integer, has leading zeros
+
+    print "tag_char_count: $tag_char_count  data_bytes: $data_byte_count\n" if $Debug;
+
+    $data_buffer = substr($buffer, $tag_char_count + 2, $data_byte_count);
+    $length_data_buffer = length($data_buffer);
+
+    print "\n\nFinal buffer ($length_data_buffer bytes)\n" if $Debug;
+
+# Unpack and convert the waveform data
+#
+    my @points = unpack('n*', $data_buffer);  # 16 bit words, big endian / network order
+#    my @points = unpack('C*', $data_buffer);   # 8 bit bytes, may truncate some data, like averages
+
+    for ($i = 0; $i < @points; $i++) { # Convert to voltage
+	$Waveform[$i] = $wave_yincrement * ($points[$i] - $wave_yreference) + $wave_yorigin;
+    }
+
+    return $channel_units, $wave_xincrement, $wave_xorigin, $wave_xreference, @Waveform;
+}
+
+sub ISOsecond {   # Put time into ISO format
+  my ($sec, $min, $hour, $day, $mon, $year,
+      $wday, $yday, $isdat, $isodate, $fmt_isodate);
+  ($sec, $min, $hour, $day, $mon, $year, $wday, $yday, $isdat)
+    = gmtime(time);
+#      = localtime($t);
+  $mon++; # month is zero-based
+  $year += 1900;
+  $isodate = sprintf("%04d%02d%02d%02d%02d%02d", $year, $mon, $day, $hour, $min, $sec);
+  $fmt_isodate = sprintf('%04d-%02d-%02dT%02d:%02d:%02d', $year, $mon, $day, $hour, $min, $sec);
+  return $isodate, $fmt_isodate;
+}
+
+sub TrimWhiteCRLF { # Remove CR, LF, and leading and trailing whitespace
+    $_[0] =~ s/[\r\n]/ /g;
+    $_[0] =~ s/^\s+//;
+    $_[0] =~ s/\s+$//;
+}
+
+__END__
+
+Tests (set syntax assumes tcsh shell)
+
+ set SCOPE_IP=192.168.3.14
+ set DATA_DIR=/home/meekj/temp/scope
+
+ scope_get_data
+
+ scope_get_data -h
+
+ scope_get_data --help
+
+ scope_get_data --man
+
+ scope_get_data --ip $SCOPE_IP --file test1.dat
+
+ scope_get_data --ip $SCOPE_IP --file test2.dat --points 2000
+
+ scope_get_data --ip $SCOPE_IP --file test2.dat --points 2000
+
+ scope_get_data --ip $SCOPE_IP --file test2.dat --points 2000 --overwrite
+
+ scope_get_data --ip $SCOPE_IP --file test3.dat --points 2000 --channels 1,3
+
+ scope_get_data --ip $SCOPE_IP --file test4.dat --points 2000 --channels 1,3 --channelnames BareWire,Nothing
+
+ scope_get_data --ip $SCOPE_IP --file test4.dat --points 2000 --channels 1,3 --datadir $DATA_DIR
+
+ scope_get_data --ip $SCOPE_IP --file test4 --points 2000 --channels 1,3 --datadir $DATA_DIR --tsfile
+
+ scope_get_data --ip $SCOPE_IP --file test4 --points 2000 --channels 1,3 --datadir $DATA_DIR --tsfile --prompt
+
+ scope_get_data --ip $SCOPE_IP --file test4 --points 65536 --channels 1,3 --datadir $DATA_DIR --tsfile
+
+ scope_get_data --ip $SCOPE_IP --file test4 --points 2000 --channels 1,3 --datadir $DATA_DIR --tsfile --debug
+
+
