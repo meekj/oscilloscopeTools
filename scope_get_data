@@ -173,7 +173,7 @@ use Getopt::Long;
 use Pod::Usage;
 
 
-my $RCSid = q{$Id: scope_get_data,v 1.10 2016/10/30 03:28:01 meekj Exp $};
+my $RCSid = q{$Id: scope_get_data,v 1.11 2016/10/30 23:32:47 meekj Exp $};
 
 my ($ScopeIP, $Port, $PointsToRead, $OutputFile, $ChannelList, $ChannelNameList, $TimeStampFileName, $PromptForComment, $Debug, $Help, $ManPage);
 my ($Comment, $ISOsec, $NumPoints, $NumPointsString, $OUTFILE, $OutputData, $OutputFilename, 
@@ -229,7 +229,7 @@ if ($PointsToRead) {
     $NumPointsString = qq{WAVEFORM:POINTS MAX\r\n};
 }
 
-$TimeOut = 10 unless $TimeOut;
+$TimeOut = 30 unless $TimeOut;
 
 @ChannelsToGet = split(/,/, $ChannelList) if ($ChannelList);
 
@@ -286,7 +286,7 @@ print $socket "*IDN?\r\n";
 $ScopeID = <$socket>;
 
 &TrimWhiteCRLF($ScopeID);
-print "ScopeID: $ScopeID\n" if $Debug;
+print "ScopeID: $ScopeID\n\n" if $Debug;
 
 print $socket "WAVeform:POINts:MODE RAW\r\n";  # Needed to get more than 62500 points
 
@@ -297,7 +297,6 @@ print $socket $NumPointsString;
 
 # Get waveforms from each specified channel
 #
-#foreach my $i (@ChannelsToGet) {
 
 for (my $i = 0; $i < @ChannelsToGet; $i++) {
 
@@ -310,13 +309,13 @@ for (my $i = 0; $i < @ChannelsToGet; $i++) {
     print "Loop: $i Channel: $ChannelNumber[$i]  Name: $ChannelName[$i]\n" if $Debug;
 
     ($WaveUnits, $WaveTimeIncrement, $WaveTimeOrigin, $WaveTimeReference, @twave) = &GetWaveform($ChannelNumber[$i]);
-    print "Back from GetWaveform\n" if $Debug;
+
     $Wave{$ChannelName[$i]} = [ @twave ];
     push(@UnitsOrder, $WaveUnits);
     push(@NameOrder, $ChannelName[$i]);
     $num_points = @twave;
     push(@PointsPerChannel, $num_points);
-    print "Got Channel: $ChannelNumber[$i]  Points: $num_points  $ChannelName[$i]\n";
+    print "Got Channel: $ChannelNumber[$i]  Points: $num_points  $ChannelName[$i]\n\n";
 }
 
 $NumPoints = $PointsPerChannel[0]; # Should verify all the same length
@@ -356,7 +355,7 @@ $socket->shutdown(2); # We have stopped using this socket
 sub GetWaveform {
     my ($channel) = @_;
     my @Waveform = ();
-    my ($count, $read_buffer, $buffer, $timeout, $i);
+    my ($count, $read_buffer, $timeout, $i);
     my ($format, $type, $num_points, $wave_count, $wave_xincrement, $wave_xorigin);
 
     my ($wave_xreference, $wave_yincrement, $wave_yorigin, $wave_yreference, $channel_units, $data_buffer, $tag_char_count,
@@ -378,20 +377,28 @@ sub GetWaveform {
 # Request the data
 #
     $socket->write("WAVEFORM:DATA?\r\n");
-    $buffer = <$socket>;
 
-    $buffer =~ /\A\#(\d{1})/;
+    $read_buffer = <$socket>;
+
+    $read_buffer =~ /\A\#(\d{1})/;
     $tag_char_count = $1;
 
-    $buffer =~ /\A\#(\d{1})(\d{$tag_char_count})/;
+    $read_buffer =~ /\A\#(\d{1})(\d{$tag_char_count})/;
     $data_byte_count = $2 + 0; # Make it an integer, has leading zeros
 
     print "tag_char_count: $tag_char_count  data_bytes: $data_byte_count\n" if $Debug;
 
-    $data_buffer = substr($buffer, $tag_char_count + 2, $data_byte_count);
+    $data_buffer = substr($read_buffer, $tag_char_count + 2, $data_byte_count);
     $length_data_buffer = length($data_buffer);
 
-    print "\n\nFinal buffer ($length_data_buffer bytes)\n" if $Debug;
+    if ($length_data_buffer != $data_byte_count) { # We did not get all of the expected data, keep reading
+	do {
+	    print "***** Doing extra data read *****\n"; # Want to know if this kicks in, so print even if not Debug
+	    $data_buffer .= <$socket>;
+	} until (length($data_buffer) >= $data_byte_count);
+    }
+
+    print "\nFinal buffer ($length_data_buffer bytes)\n\n" if $Debug;
 
 # Unpack and convert the waveform data
 #
