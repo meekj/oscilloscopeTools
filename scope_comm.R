@@ -22,7 +22,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-## $Id: scope_comm.R,v 1.3 2016/11/11 17:07:10 meekj Exp $
+## $Id: scope_comm.R,v 1.5 2016/11/12 02:31:05 meekj Exp $
 
 ## The functions below will eventually be part of a R package, likely to be called oscilloscopeR
 ## A multiple channel read function will be added
@@ -55,13 +55,13 @@ scopeGetSingleWaveform <- function(connection, channel, points, Debug = FALSE) {
     i <- 0
     while (length(wave_preamble) == 0) { # Handle non-blocking connection where result can be delayed
         i <- i + 1
-        char_read <- readChar(connection, 200) # Usually about 90 characters
-        wave_preamble <- append(wave_preamble, char_read)
+        char_read <- readChar(connection, 200)            # Usually about 90 characters
+        wave_preamble <- append(wave_preamble, char_read) # Should all be in a single read, but just in case...
         Sys.sleep(loop_sleep)
     }
     if (Debug) {cat(paste("final wave_preamble: ", i, wave_preamble), "\n")}
 
-    wave_preamble_items <- unlist(strsplit(wave_preamble, '[,\n]')) # Possibly need to add \r on Windows?
+    wave_preamble_items <- unlist(strsplit(wave_preamble, '[,\n]')) # Comma separated, LF terminated
 
     wave_format     <- as.integer(wave_preamble_items[1]) # Unpack the preamble string
     wave_type       <- as.integer(wave_preamble_items[2])
