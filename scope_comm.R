@@ -1,11 +1,10 @@
-## -----------------------------------------------------------
 ##
 ## Demonstration of Oscilloscope Control and Data Acquisition in Pure R
 ##
 
 ## Use IDE such as RStudio or ESS to run blocks of code, or just paste into R session
 
-## Tested on Keysight DSO-X 3024T
+## Tested on Keysight DSO-X 3024T with Linux and MacOS
 
 # Copyright (C) 2016  Jon Meek
 
@@ -22,13 +21,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-## $Id: scope_comm.R,v 1.5 2016/11/12 02:31:05 meekj Exp $
+## $Id: scope_comm.R,v 1.6 2016/11/17 13:41:42 meekj Exp $
 
 ## The functions below will eventually be part of a R package, likely to be called oscilloscopeR
 ## A multiple channel read function will be added
 
 scopeConnect <- function(addr, port) { # Returns connection object, be sure to close when finished
     socketConnection(host = addr, port, timeout=2, open = "r+b", blocking = FALSE)
+}
+
+scopeConnectBlocking <- function(addr, port) { # Use for line oriented I/O, not for waveform data
+    socketConnection(host = addr, port, timeout=2, open = "r+b", blocking = TRUE)
 }
 
 scopeGetSingleWaveform <- function(connection, channel, points, Debug = FALSE) {
@@ -104,8 +107,7 @@ scopeGetSingleWaveform <- function(connection, channel, points, Debug = FALSE) {
 }
 
 
-##
-## Sample usage
+## Sample usage - Setup
 ##
 ScopeIP <- '192.168.3.14' # Your scope's IP address, hostname might work
 ScopePort <- 5025         # For Keysight
@@ -113,7 +115,7 @@ ScopePort <- 5025         # For Keysight
 
 ## Example: Get Instrument ID and exit
 ##
-con <- scopeConnect(ScopeIP, ScopePort)
+con <- scopeConnectBlocking(ScopeIP, ScopePort) # Blocking connection for getting single line
 writeLines("*IDN?", con)
 flush(con)
 ScopeID <- readLines(con)
@@ -157,11 +159,11 @@ library(e1071)      # For Hanning window generation
 AcqPoints <- 500000 # 500k points for nice frequency domain resolution
 Title <- 'Central NJ - FM Spectrum'
 
-wf1 <- NULL
-con <- scopeConnect(ScopeIP, ScopePort)
-
 DisplayStart <-  87 # Mhz FM broadcast range, likely something to see here
 DisplayEnd   <- 110 # Mhz
+
+wf1 <- NULL
+con <- scopeConnect(ScopeIP, ScopePort)
 
 j <- 5 # Number of acquisition loops and frequency domain spectra to average
 
@@ -209,8 +211,8 @@ while (j > 0) {
     
     Sys.sleep(2)                                            # Delay so that we can observe the spectrum on each loop
 }
-
 close(con)
+
 str(pwr_spectrum)
 
 
@@ -236,7 +238,7 @@ f0 <- display_data$F[1] # Channel to frequency conversion
 df <- display_data$F[2] - display_data$F[1]
 
 Peaks <- data.frame(list(F = f0 + df * pk$x, Height = pk$y, Chan = pk$x)) # Put peaks in a data frame
-Peaks
+Peaks                                                                     # List the peaks
 
 Title <- 'Central NJ - FM Broadcast Spectrum'
 
@@ -249,7 +251,8 @@ label_offset <- 0.02 * max(display_data$Pwr) # Position peak labels just above p
 ggplot(display_data) + geom_line(aes(x = F, y = Pwr), color = 'blue') +
     xlab('F, MHz') + ylab('Power') + ggtitle(Title) +
     geom_text(data = Peaks, aes(x = F, y = Height +
-    label_offset, label = sprintf('%0.1f', F))) + theme_jm2
+    label_offset, label = sprintf('%0.1f', F)))
+
 
 ## Save plot to PDF
 OutFile <- '/n2/r-reports/fm2.pdf'
