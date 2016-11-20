@@ -122,9 +122,10 @@ columns, generate a unique filename with a UTC timestamp:
 
  Instrument ID
  Original file name, full path if --datadir is specified
- Optional comment when --prompt option is added, readers will need to handle
  UTC date and time of data transfer
+ List of channels numbers, in order
  Units, first two columns are hardcoded to 'int' and 'second', other columns come from the scope
+ Optional comment when --prompt option is added, readers will need to handle
  Column names, first two columns are hardcoded to 'n' and 't'
  Lines of space separated data
 
@@ -132,9 +133,10 @@ Example, with optional comment:
 
  KEYSIGHT TECHNOLOGIES,DSO-X 3024T,MY56271xxx,04.07.2016040803
  /home/meekj/temp/scope/example1-20161030024802.dat
- Fanfare FM Antenna & Random Length Wire
  2016-10-30T02:48:02
+ 1 3
  int second VOLT VOLT
+ Fanfare FM Antenna & Random Length Wire
  n t Chan1 Chan3
  1 -2.500000e-07 -0.005226131456 0.024924619008
  2 -2.498000e-07 -0.004824121344 0.02814069888
@@ -173,7 +175,7 @@ use Getopt::Long;
 use Pod::Usage;
 
 
-my $RCSid = q{$Id: scope_get_data,v 1.11 2016/10/30 23:32:47 meekj Exp $};
+my $RCSid = q{$Id: scope_get_data,v 1.12 2016/11/20 03:55:50 meekj Exp $};
 
 my ($ScopeIP, $Port, $PointsToRead, $OutputFile, $ChannelList, $ChannelNameList, $TimeStampFileName, $PromptForComment, $Debug, $Help, $ManPage);
 my ($Comment, $ISOsec, $NumPoints, $NumPointsString, $OUTFILE, $OutputData, $OutputFilename, 
@@ -326,13 +328,13 @@ print "NumPoints: $NumPoints\n" if $Debug;
 #
 print $OUTFILE "$ScopeID\n";
 print $OUTFILE "$OutputFilename\n";
-print $OUTFILE "$Comment\n" if (length($Comment)); # Reader will have to account for this being optional
 print $OUTFILE "$fmtISOsec\n";
-
+print $OUTFILE "@ChannelsToGet\n";
 $OutputData = q{int second }; # Units header
 $OutputData .= join(' ', @UnitsOrder);
 print $OUTFILE "$OutputData\n";
 
+print $OUTFILE "$Comment\n" if (length($Comment)); # Reader will have to account for this being optional
 $OutputData = q{n t }; # Column names header
 $OutputData .= join(' ', @NameOrder);
 print $OUTFILE "$OutputData\n";
@@ -461,6 +463,8 @@ Tests (set syntax assumes tcsh shell)
  scope_get_data --ip $SCOPE_IP --file test4.dat --points 2000 --channels 1,3 --datadir $DATA_DIR
 
  scope_get_data --ip $SCOPE_IP --file test4 --points 2000 --channels 1,3 --datadir $DATA_DIR --tsfile
+
+ scope_get_data --ip $SCOPE_IP --file test4  --channels 1,3 --datadir $DATA_DIR --tsfile
 
  scope_get_data --ip $SCOPE_IP --file test4 --points 2000 --channels 1,3 --datadir $DATA_DIR --tsfile --prompt
 

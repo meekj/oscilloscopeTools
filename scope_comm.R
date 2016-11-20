@@ -21,7 +21,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-## $Id: scope_comm.R,v 1.6 2016/11/17 13:41:42 meekj Exp $
+## $Id: scope_comm.R,v 1.7 2016/11/20 03:35:35 meekj Exp $
 
 ## The functions below will eventually be part of a R package, likely to be called oscilloscopeR
 ## A multiple channel read function will be added
@@ -263,4 +263,5 @@ OutFile <- '/n2/r-reports/fm2.png'
 ggsave(OutFile, dpi=150, height = 4, width = 8) # Labels too close to peak tops with 4 x 8
 
 ## Write frequency domain data to a file
-write.table(pwr_spectrum, 'fd-25avg-1.dat', quote=FALSE) # Space separated data file
+File <- '~/lab/R/data/fd-5avg-dualfs-1.dat'
+write.table(pwr_spectrum, File, quote=FALSE) # Space separated data file
